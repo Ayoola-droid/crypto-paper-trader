@@ -47,7 +47,7 @@
 - **Moving the stop only moves the problem.** A wider stop wins more often but needs a higher hit rate to break even; no stop size closed the gap.
 - **Being picky mostly meant not trading.** The stricter rule cut trades from 2,121 to 98 and losses with them, but the loss per trade barely changed.
 - **Fading surge breakouts (betting they fail) lost €76.38 over 216 trades.** One of its 12 settings made €6.66 over 39 trades. With 60 results tried, a few positives are expected by luck alone: only 1 of the 60 made money over at least 30 trades.
-- **Funding-rate carry** (lever 4, `src/funding_carry.py`) earns the payments between futures traders instead of predicting prices. Results to follow.
+- **Funding-rate carry (lever 4, `src/funding_carry.py`) was the only lever that made money, but slowly.** Buying €100 of a coin and shorting €100 of its perpetual future, then holding both, collected the funding that futures traders pay. Over 30 October 2025 to 8 November 2026 (8,974 hourly funding periods), Bitcoin and Ether each earned €3.79 in funding, or €2.95 after fees with limit orders (2.9% a year): about €1 every 99 days, not €1 a trade. Solana, XRP and Dogecoin earned €0.69–€2.35. Switching the trade on only after a week of positive funding lost money on every coin (−€1.78 to −€34.11), because funding changed direction often and every switch paid fees. A real version also needs extra money as margin for the short and carries euro/dollar and exchange risk, as Kraken's perpetuals are priced in US dollars.
 - **Not tested:** market making and arbitrage between exchanges need live order-book data, which hourly candles do not contain.
 
 ## Skills demonstrated
