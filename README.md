@@ -29,6 +29,27 @@
 - **The 15-minute trend strategy beat buy-and-hold at derivatives fees in one falling week (1–8 November)**, mainly through short trades. The 10-month hourly test above suggests this does not hold up over time.
 - **Holding was better than trading in 2026:** all five coins fell, but holding lost €9–€39 per €100, less than the indicator strategies lost on most coins.
 
+## Levers tested to make €1 per trade more likely
+
+`py src\experiments.py` re-runs the walk-forward test with one setting changed at a time. Totals below are across the five coins and the four main options (single indicator, combination, trending coins only, volume surge + breakout), €100 per trade, hourly prices for 1 January to 8 November 2026.
+
+| Lever | Setting | Trades | Hit €1 | Break-even | Profit | Per trade |
+|---|---|---|---|---|---|---|
+| Baseline | derivatives, market orders | 2,121 | 35.9% | 58.3% | −€645.16 | −€0.30 |
+| 1 Costs | derivatives, limit orders (0.02% maker) | 2,649 | 33.7% | 53.7% | −€616.83 | −€0.23 |
+| 1 Costs | spot, limit orders (0.40% maker) | 210 | 29.5% | 75.2% | −€235.47 | −€1.12 |
+| 2 Exits | stop at half the target distance | 1,519 | 24.2% | 44.4% | −€416.59 | −€0.27 |
+| 2 Exits | stop at 3× the target distance | 2,720 | 47.6% | 79.2% | −€919.52 | −€0.34 |
+| 3 Pickiness | look-back hit rate ≥ break-even + 5 points | 98 | 37.7% | 58.3% | −€23.12 | −€0.24 |
+| All three | limit orders + stop 1× + picky | 186 | 40.3% | 53.7% | −€22.00 | −€0.12 |
+
+- **Cheaper fees lowered the bar but also the hit rate.** Limit orders cut the break-even hit rate from 58% to 54%, but they fill when the price moves against you, so the hit rate fell from 35.9% to 33.7%.
+- **Moving the stop only moves the problem.** A wider stop wins more often but needs a higher hit rate to break even; no stop size closed the gap.
+- **Being picky mostly meant not trading.** The stricter rule cut trades from 2,121 to 98 and losses with them, but the loss per trade barely changed.
+- **Fading surge breakouts (betting they fail) lost €76.38 over 216 trades.** One of its 12 settings made €6.66 over 39 trades. With 60 results tried, a few positives are expected by luck alone: only 1 of the 60 made money over at least 30 trades.
+- **Funding-rate carry** (lever 4, `src/funding_carry.py`) earns the payments between futures traders instead of predicting prices. Results to follow.
+- **Not tested:** market making and arbitrage between exchanges need live order-book data, which hourly candles do not contain.
+
 ## Skills demonstrated
 
 - **Python and pandas:** web APIs, large archive downloads, combining files, time-series indicators (EMA, MACD, RSI, ATR, ADX, Supertrend, Ichimoku, Bollinger, Donchian, OBV, VWAP)
@@ -66,7 +87,7 @@
 3. **€1 target:** every trade risks €100 and closes at the price that gives exactly €1 after fees and slippage, at a stop the same price distance away, or after 48 hours.
 4. **Walk-forward test:** each week the bot looks back 3 weeks, picks the combination that made the most there (at least 5 trades), and trades it for the next week. If nothing made money, it sits the week out.
 5. **Reachability check:** a trade is skipped if the market is too calm for the €1 move to be likely within 2 days.
-6. **Volume surge + breakout (optional pool):** a trade is allowed only when the last 24 hours' volume is at least 1.25, 1.5 or 2 times the average day of the past week, and the price closes above its 12, 24 or 48-hour high (long) or below the matching low (short). The walk-forward test picks the best of these 9 variants each week.
+6. **Volume surge + breakout (optional pool):** a trade is allowed only when the last 24 hours' volume is at least 1.25, 1.5 or 2 times the average day of the past week, and the price closes above its 12, 24 or 48-hour high (long) or below the matching low (short). The walk-forward test picks the best of these 9 variants each week. **Fade surge breakout** uses the same 9 signals reversed, betting the break fails; that idea came from these same 10 months, so its result is biased upwards.
 7. **Trending coins only (optional pool):** at the start of each week, coins are ranked by efficiency ratio over the previous week (net price change ÷ total distance travelled; 1 = a straight line, 0 = zig-zag). Only the top 2, with a ratio of at least 0.10, may trade that week, and only in the direction of their trend. A look-back week that touches a hole in the data counts as no trend.
 
 | Output | Contents |
@@ -106,6 +127,8 @@ py src\fetch_prices.py       # latest 1-minute, 15-minute and hourly prices
 py src\indicator_lab.py      # walk-forward indicator test
 py src\paper_trader.py       # scalping test
 py src\trend_trader.py       # 15-minute trend test
+py src\experiments.py       # the levers above, one at a time
+py src\funding_carry.py     # funding-rate carry study (downloads Kraken Futures funding history)
 streamlit run app.py         # the front end
 ```
 
@@ -133,6 +156,8 @@ If PowerShell blocks the activate script, run `Set-ExecutionPolicy -Scope Curren
 | `src/download_history.py` | Downloads Kraken's quarterly archives and keeps only hourly prices for the five coins |
 | `src/fetch_prices.py` | Downloads the latest 1-minute, 15-minute and hourly prices and prints a first inspection |
 | `src/indicator_lab.py` | Walk-forward test of 10 indicators and 86 combinations with a €1 profit target, with optional trending-coins filter |
+| `src/experiments.py` | Re-runs the indicator lab with cheaper fees, different stops and a stricter confidence rule |
+| `src/funding_carry.py` | Downloads Kraken Futures funding rates and measures a carry trade (long coin + short perpetual) after costs |
 | `src/paper_trader.py` | Scalping backtest on Bitcoin, at four fee levels |
 | `src/trend_trader.py` | Long/short 15-minute trend backtest on five coins, against buy-and-hold |
 
@@ -143,6 +168,7 @@ crypto-paper-trader/
 ├── docs/              screenshots of the app
 ├── data/
 │   ├── history/       hourly prices from Kraken's quarterly archives
+│   ├── funding/       Kraken Futures funding rates
 │   ├── raw/           one CSV per coin, candle size and API download; never edited
 │   └── archive/       temporary ZIP downloads (not committed)
 ├── output/            results and trade logs (not committed)
