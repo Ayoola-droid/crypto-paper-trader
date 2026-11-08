@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+output/
+logs/
+.vscode/
+Claude outputs/
