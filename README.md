@@ -8,6 +8,8 @@
 
 **Status:** In progress. Three strategies tested, with a Streamlit front end for the indicator lab.
 
+![The indicator lab app: profit after costs for each coin and option, against just holding the coin](docs/app_results.png)
+
 > No real money is traded. "Paper trading" replays real prices with pretend money.
 
 ## Key findings
@@ -38,6 +40,14 @@
 ## The app
 
 `streamlit run app.py` opens the indicator lab in the browser. Choose coins, fee level, what the bot may choose from, the profit target, the look-back and the number of trending coins in the sidebar; the results update on their own. A **Download latest prices** button runs `fetch_prices.py`.
+
+![Every trade the bot made on Bitcoin, marked on the price chart](docs/app_trades.png)
+
+*Bitcoin, single indicators at derivatives fees: ▲ long, ▼ short; blue reached the €1 target, red did not. The flat stretch in early October is the gap between Kraken's archive and its live data, where the bot does not trade.*
+
+![How often each indicator called the next 24 hours correctly, by coin](docs/app_accuracy.png)
+
+*Grey is a coin flip (50%), blue is better and red is worse. Almost every cell is grey or red.*
 
 | Tab | Shows |
 |---|---|
@@ -129,6 +139,7 @@ If PowerShell blocks the activate script, run `Set-ExecutionPolicy -Scope Curren
 
 ```
 crypto-paper-trader/
+├── docs/              screenshots of the app
 ├── data/
 │   ├── history/       hourly prices from Kraken's quarterly archives
 │   ├── raw/           one CSV per coin, candle size and API download; never edited
