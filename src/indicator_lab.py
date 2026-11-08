@@ -36,6 +36,9 @@ FEE_LEVELS = {
     "spot maker 0.40%": {"entry": 0.0040, "target": 0.0040, "stop": 0.0080, "limit_orders": True},
     "derivatives maker 0.02%": {"entry": 0.0002, "target": 0.0002, "stop": 0.0005, "limit_orders": True},
 }
+# A trade counts as a hit when it reaches its target price. (Not "profit >= EUR 1": a short held
+# longer than 4 hours pays extra borrowing, so it can reach the target and keep EUR 0.98.)
+TARGET_REASON = "EUR 1 target"
 STOP_MULTIPLE = 1.0      # stop distance = this x the distance to the EUR 1 target (1 = same distance)
 PICKY_MARGIN = None      # e.g. 0.05: only trust a combination whose look-back hit rate beat break-even by 5 points
 PICKY_MIN_TRADES = 10    # ...over at least this many look-back trades
@@ -316,7 +319,7 @@ def precompute_outcomes(df, fees):
             if first_sl <= first_tp and first_sl < len(hi):     # same hour: assume stop first
                 j, price, why, fo, so = i + 1 + first_sl, sl, "stop loss", fs, ss
             elif first_tp < len(hi):
-                j, price, why, fo, so = i + 1 + first_tp, tp, "EUR 1 target", ft, st
+                j, price, why, fo, so = i + 1 + first_tp, tp, TARGET_REASON, ft, st
             else:
                 j, price, why, fo, so = last, close[last], "time limit", fs, ss
             exit_idx[i], reason[i] = j, why
@@ -367,7 +370,7 @@ def walk_forward(df, signals, pool, outcomes, reachable, allowed=None, min_hit_r
             if min_hit_rate is not None:     # stricter rule: enough trades AND a hit rate above break-even
                 if len(train_trades) < PICKY_MIN_TRADES:
                     continue
-                hits = sum(t[3] > 0.99 * TARGET_PROFIT for t in train_trades)
+                hits = sum(t[4] == TARGET_REASON for t in train_trades)
                 if hits / len(train_trades) < min_hit_rate:
                     continue
             if len(train_trades) >= MIN_TRAIN_TRADES and total > best_profit:
@@ -522,7 +525,7 @@ def run_lab(data, fee_levels, pools, progress=None):
                 hs_name, hs_profit = hindsight_best(df, source, pool, outcomes, reachable,
                                                     test_start, allowed)
                 n = len(trades)
-                wins = int((trades["net_profit"] > 0.99).sum()) if n else 0
+                wins = int((trades["exit_reason"] == TARGET_REASON).sum()) if n else 0
                 summary.append({
                     "pair": pair, "fees": fee_label, "pool": pool_name,
                     "move_needed_%": round(needed * 100, 2),

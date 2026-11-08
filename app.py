@@ -293,7 +293,7 @@ with tab_trades:
     sel = trades[(trades["pair"] == coin_t) & (trades["pool"] == pool_t)] if not trades.empty else trades
     if not sel.empty:
         for won, colour, label in [(True, THEME["gain"], "hit the target"), (False, THEME["loss"], "missed")]:
-            part = sel[(sel["net_profit"] > 0.99 * target) == won]
+            part = sel[(sel["exit_reason"] == lab.TARGET_REASON) == won]
             fig.add_scatter(
                 x=part["entry_time"], y=part["entry_price"], mode="markers", name=label,
                 marker=dict(size=11, color=colour, line=dict(width=2, color=THEME["surface"]),
