@@ -1,0 +1,67 @@
+# Design direction: "Night ledger" - a research notebook for a sceptical trader.
+# Blue-black page, warm paper-coloured text, one amber accent, serif headlines, monospace data.
+# Bright amber (#E9A23B, in app.py) marks key numbers; the deeper amber below is for buttons and tags.
+# Change colours and fonts here; app.py reads the same values from its THEME dictionary.
+
+[server]
+enableStaticServing = true      # serves the bundled fonts in ./static
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"         # hides the Deploy button and developer menu
+
+[theme]
+base = "dark"
+primaryColor = "#A85F15"           # deep amber: white text on it passes 4.5:1
+backgroundColor = "#0E1217"
+secondaryBackgroundColor = "#171D25"
+textColor = "#ECE6DA"
+borderColor = "#2A323D"
+font = "SourceSans3, sans-serif"
+headingFont = "Fraunces, serif"
+codeFont = "JetBrains Mono, monospace"
+headingFontWeights = [800, 800, 800, 800, 800, 800]
+baseRadius = "0.35rem"
+chartCategoricalColors = ["#3987E5", "#D95926", "#199E70"]
+
+[[theme.fontFaces]]
+family = "Fraunces"
+url = "app/static/fonts/fraunces-latin-800-normal.woff2"
+weight = 800
+
+[[theme.fontFaces]]
+family = "Fraunces"
+url = "app/static/fonts/fraunces-latin-300-normal.woff2"
+weight = 300
+
+[[theme.fontFaces]]
+family = "SourceSans3"
+url = "app/static/fonts/source-sans-3-latin-400-normal.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "SourceSans3"
+url = "app/static/fonts/source-sans-3-latin-600-normal.woff2"
+weight = 600
+
+[[theme.fontFaces]]
+family = "SourceSans3"
+url = "app/static/fonts/source-sans-3-latin-700-normal.woff2"
+weight = 700
+
+[[theme.fontFaces]]
+family = "JetBrains Mono"
+url = "app/static/fonts/jetbrains-mono-latin-400-normal.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "JetBrains Mono"
+url = "app/static/fonts/jetbrains-mono-latin-600-normal.woff2"
+weight = 600
+
+[theme.sidebar]
+backgroundColor = "#090C10"
+secondaryBackgroundColor = "#141920"
+textColor = "#ECE6DA"
