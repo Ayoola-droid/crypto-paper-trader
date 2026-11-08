@@ -26,11 +26,14 @@ THEME = {
 # Checked with a colour-blind simulator: the four pass as neighbouring bars. Lines and dots also get
 # their own dash style and marker shape, so no two options are told apart by colour alone.
 POOL_COLOURS = {"single indicator": "#3987E5", "combination": "#D95926",
-                "combination, trending coins only": "#199E70", "volume surge + breakout": "#C98500"}
+                "combination, trending coins only": "#199E70", "volume surge + breakout": "#C98500",
+                "fade surge breakout": "#9085E9"}
 POOL_DASH = {"single indicator": "solid", "combination": "dash",
-             "combination, trending coins only": "dot", "volume surge + breakout": "dashdot"}
+             "combination, trending coins only": "dot", "volume surge + breakout": "dashdot",
+             "fade surge breakout": "longdash"}
 POOL_SYMBOL = {"single indicator": "circle", "combination": "square",
-               "combination, trending coins only": "diamond", "volume surge + breakout": "triangle-up"}
+               "combination, trending coins only": "diamond", "volume surge + breakout": "triangle-up",
+               "fade surge breakout": "x"}
 COIN_NAMES = {"XBTEUR": "Bitcoin", "ETHEUR": "Ether", "SOLEUR": "Solana",
               "XRPEUR": "XRP", "XDGEUR": "Dogecoin"}
 
@@ -113,8 +116,10 @@ def load_data(signature):
 
 
 @st.cache_data(show_spinner=False)
-def run_test(signature, pairs, fees, pools, target, lookback_weeks, top_coins):
+def run_test(signature, pairs, fees, pools, target, lookback_weeks, top_coins, stop_multiple, picky):
     lab.TARGET_PROFIT = target
+    lab.STOP_MULTIPLE = stop_multiple
+    lab.PICKY_MARGIN = 0.05 if picky else None
     lab.TRAIN_HOURS = 24 * 7 * lookback_weeks
     lab.TOP_TREND_COINS = top_coins
     data = load_data(signature)
@@ -146,11 +151,22 @@ with st.sidebar:
     pairs = st.multiselect("Coins", list(COIN_NAMES), default=list(COIN_NAMES),
                            format_func=lambda p: COIN_NAMES[p])
     fee = st.radio("Fees", list(lab.FEE_LEVELS), index=1,
-                   help="Spot: Kraken's lowest tier, 0.80% per buy or sell. Derivatives: 0.05%.")
-    pools = st.multiselect("What the bot may choose from", lab.POOLS, default=lab.POOLS)
+                   help="Kraken's lowest tier. Market orders (taker): spot 0.80%, derivatives 0.05% per buy or sell. "
+                        "Maker levels use limit orders for the entry and target: cheaper and no slippage, "
+                        "but an entry only fills if the price comes back to it within the hour.")
+    pools = st.multiselect("What the bot may choose from", lab.POOLS, default=lab.POOLS[:4],
+                           help="'Fade surge breakout' bets that breakouts fail. That idea came from this same data, "
+                                "so treat its result as a hypothesis to check on new prices.")
     target = st.number_input("Profit target per trade (EUR, on a EUR 100 stake)", 0.25, 5.0, 1.0, 0.25)
     lookback = st.slider("Look-back before each week (weeks)", 1, 6, 3,
                          help="Each week the bot picks the combination that did best over this many past weeks.")
+    stop_multiple = st.select_slider("Stop distance compared with the target", [0.5, 1.0, 1.5, 2.0, 3.0], 1.0,
+                                     format_func=lambda x: f"{x:g}x",
+                                     help="1x: the stop is as far from the entry as the target. A wider stop wins more "
+                                          "often but loses more each time.")
+    picky = st.toggle("Stricter confidence rule",
+                      help="Only trade a combination whose look-back hit rate beat break-even by 5 points over at "
+                           "least 10 trades.")
     top_coins = st.slider("Trending coins traded per week", 1, 4, 2,
                           help="For the 'trending coins only' option: how many of the strongest-trending coins may trade.")
     st.button("Run test", type="primary", width="stretch")   # any change re-runs; this makes it explicit
@@ -164,7 +180,8 @@ if not pairs or not pools:
     st.stop()
 
 with st.spinner("Testing every indicator and combination, week by week…"):
-    results = run_test(signature, tuple(pairs), (fee,), tuple(pools), target, lookback, top_coins)
+    results = run_test(signature, tuple(pairs), (fee,), tuple(pools), target, lookback, top_coins,
+                       stop_multiple, picky)
 
 summary, weeks, trades = results["summary"], results["weeks"], results["trades"]
 accuracy, ranking = results["accuracy"], results["ranking"]
