@@ -5,6 +5,7 @@ Each run saves new CSVs in data/raw/ and never overwrites an earlier one.
 Kraken returns the latest 720 candles, so:
   1-minute candles  = the last 12 hours
   15-minute candles = the last 7.5 days
+  60-minute candles = the last 30 days
 """
 import time
 from datetime import datetime, timezone
@@ -15,7 +16,7 @@ import requests
 
 # Kraken's names: XBT = Bitcoin, ETH = Ether, SOL = Solana, XRP = Ripple, XDG = Dogecoin
 PAIRS = ["XBTEUR", "ETHEUR", "SOLEUR", "XRPEUR", "XDGEUR"]
-INTERVALS = [1, 15]      # minutes per candle
+INTERVALS = [1, 15, 60]  # minutes per candle
 URL = "https://api.kraken.com/0/public/OHLC"
 
 # Kraken Pro spot fee for the lowest tier (checked 4 Nov 2026 on kraken.com/features/fee-schedule).
