@@ -4,7 +4,7 @@
 
 **Data:** 10 months of hourly prices (January to November 2026) plus 1-minute and 15-minute prices for Bitcoin, Ether, Solana, XRP and Dogecoin in euro, from [Kraken's quarterly archives](https://support.kraken.com/articles/360047124832-downloadable-historical-ohlcvt-open-high-low-close-volume-trades-data) and [public API](https://docs.kraken.com/api/docs/rest-api/get-ohlc-data). Fees from [Kraken's spot fee schedule](https://www.kraken.com/features/fee-schedule) (checked 4 November 2026) and [derivatives fees](https://support.kraken.com/articles/360048917612).
 
-**Tools:** Python (pandas, NumPy, requests), Streamlit, Plotly
+**Tools:** Python (pandas, NumPy, requests, scikit-learn), Streamlit, Plotly
 
 **Status:** In progress. Three strategies tested, with a Streamlit front end for the indicator lab.
 
@@ -16,8 +16,8 @@
 
 1. **No indicator, alone or combined, could make €1 per trade.** Across 10 popular indicators and 86 combinations, tested week by week on prices the bot had not yet seen, every coin lost money at both fee levels. At derivatives fees, combinations lost €319 over 948 trades (€100 stake each); single indicators lost €245 over 869 trades.
 2. **The indicators are close to coin flips.** When an indicator pointed up or down, the price moved that way over the next 24 hours only 44–51% of the time for trend indicators (EMA, MACD, Supertrend, Ichimoku, ADX). The best was Bollinger Bands at 54% on XRP and Dogecoin.
-3. **A €1 target needs a high hit rate, because losing trades pay fees too.** At derivatives fees the bot must hit its target 58% of the time to break even (81% at spot fees); it managed 29–39%.
-4. **Trading only strongly trending coins cut the losses but did not make money.** Ranking coins each week by how straight their price path was (efficiency ratio) and trading only the top 2, in their trend's direction, lost €10.38 over 119 trades at derivatives fees (−€0.09 a trade, against −€0.34 for all coins). The hit rate rose from 36% to 47%, still short of the 58% needed, and the bot traded in only 10 of 210 coin-weeks, so the sample is small.
+3. **A €1 target needs a high hit rate, because losing trades pay fees too.** At derivatives fees the bot must hit its target 58% of the time to break even (81% at spot fees); it managed 43–49%. With the stop as far away as the target, that is about what coin flips give.
+4. **Trading only strongly trending coins cut the losses but did not make money.** Ranking coins each week by how straight their price path was (efficiency ratio) and trading only the top 2, in their trend's direction, lost €10.38 over 119 trades at derivatives fees (−€0.09 a trade, against −€0.34 for all coins). The hit rate rose from 45% to 56%, still short of the 58% needed, and the bot traded in only 10 of 210 coin-weeks, so the sample is small.
 5. **Waiting for a breakout after a volume surge did not work either.** A busy day did come before bigger moves (7.3% the next week against 5.6% otherwise), but the breakouts mostly reversed: 6 hours after a surge breakout the price was still going the same way only 37–47% of the time. Following them lost €69.89 over 185 trades at derivatives fees (−€0.38 a trade).
 
 ### Further detail
@@ -35,26 +35,42 @@
 
 | Lever | Setting | Trades | Hit €1 | Break-even | Profit | Per trade |
 |---|---|---|---|---|---|---|
-| Baseline | derivatives, market orders | 2,121 | 35.9% | 58.3% | −€645.16 | −€0.30 |
-| 1 Costs | derivatives, limit orders (0.02% maker) | 2,649 | 33.7% | 53.7% | −€616.83 | −€0.23 |
-| 1 Costs | spot, limit orders (0.40% maker) | 210 | 29.5% | 75.2% | −€235.47 | −€1.12 |
-| 2 Exits | stop at half the target distance | 1,519 | 24.2% | 44.4% | −€416.59 | −€0.27 |
-| 2 Exits | stop at 3× the target distance | 2,720 | 47.6% | 79.2% | −€919.52 | −€0.34 |
-| 3 Pickiness | look-back hit rate ≥ break-even + 5 points | 98 | 37.7% | 58.3% | −€23.12 | −€0.24 |
-| All three | limit orders + stop 1× + picky | 186 | 40.3% | 53.7% | −€22.00 | −€0.12 |
+| Baseline | derivatives, market orders | 2,121 | 46.7% | 58.3% | −€645.16 | −€0.30 |
+| 1 Costs | derivatives, limit orders (0.02% maker) | 2,649 | 44.2% | 53.7% | −€616.83 | −€0.23 |
+| 1 Costs | spot, limit orders (0.40% maker) | 210 | 47.1% | 75.2% | −€235.47 | −€1.12 |
+| 2 Exits | stop at half the target distance | 1,519 | 30.7% | 44.4% | −€416.59 | −€0.27 |
+| 2 Exits | stop at 3× the target distance | 2,720 | 68.3% | 79.2% | −€919.52 | −€0.34 |
+| 3 Pickiness | look-back hit rate ≥ break-even + 5 points | 933 | 48.8% | 58.3% | −€235.10 | −€0.25 |
+| All three | limit orders + stop 1× + picky | 1,137 | 45.7% | 53.7% | −€227.37 | −€0.20 |
 
-- **Cheaper fees lowered the bar but also the hit rate.** Limit orders cut the break-even hit rate from 58% to 54%, but they fill when the price moves against you, so the hit rate fell from 35.9% to 33.7%.
+- **Cheaper fees lowered the bar but also the hit rate.** Limit orders cut the break-even hit rate from 58% to 54%, but they fill when the price moves against you, so the hit rate fell from 46.7% to 44.2%.
 - **Moving the stop only moves the problem.** A wider stop wins more often but needs a higher hit rate to break even; no stop size closed the gap.
-- **Being picky mostly meant not trading.** The stricter rule cut trades from 2,121 to 98 and losses with them, but the loss per trade barely changed.
-- **Fading surge breakouts (betting they fail) lost €76.38 over 216 trades.** One of its 12 settings made €6.66 over 39 trades. With 60 results tried, a few positives are expected by luck alone: only 1 of the 60 made money over at least 30 trades.
+- **Being picky mostly meant trading less.** The stricter rule cut trades from 2,121 to 933 and losses with them, but the loss per trade barely changed (−€0.25 against −€0.30).
+- **Fading surge breakouts (betting they fail) lost €76.38 over 216 trades**, and none of its 12 settings made money. Across all 60 results tried, none was profitable.
 - **Funding-rate carry (lever 4, `src/funding_carry.py`) was the only lever that made money, but slowly.** Buying €100 of a coin and shorting €100 of its perpetual future, then holding both, collected the funding that futures traders pay. Over 30 October 2025 to 8 November 2026 (8,974 hourly funding periods), Bitcoin and Ether each earned €3.79 in funding, or €2.95 after fees with limit orders (2.9% a year): about €1 every 99 days, not €1 a trade. Solana, XRP and Dogecoin earned €0.69–€2.35. Switching the trade on only after a week of positive funding lost money on every coin (−€1.78 to −€34.11), because funding changed direction often and every switch paid fees. A real version also needs extra money as margin for the short and carries euro/dollar and exchange risk, as Kraken's perpetuals are priced in US dollars.
 - **Not tested:** market making and arbitrage between exchanges need live order-book data, which hourly candles do not contain.
+
+## What winning trades have in common (`src/pattern_study.py`)
+
+Every hour, for every coin, the study imagines a long and a short trade with the €1 target (62,960 possible trades) and records 15 measurements of the market at that moment: volatility, trend, momentum, volume, time of day, how many indicators agreed, what Bitcoin was doing, and more. It looks for patterns **only in January–June**, then tests them on **July–November**, which the search never saw.
+
+| Scenario (derivatives fees, one trade at a time) | Jan–Jun hit rate | Jan–Jun per trade | Jul–Nov trades | Jul–Nov hit rate | Jul–Nov profit | Jul–Nov per trade |
+|---|---|---|---|---|---|---|
+| Every hour, no filter | 47.4% | −€0.29 | 1,580 | 48.6% | −€396.16 | −€0.25 |
+| Best single pattern: past week moved 1.6–5.2% in the trade's direction | 51.8% | −€0.18 | 716 | 44.4% | −€257.42 | −€0.36 |
+| Decision-tree rule above break-even | 71.4% | €0.32 | 61 | 39.3% | −€25.43 | −€0.42 |
+| Model using all 15 measurements: expected hit rate ≥ break-even | 71.0% | €0.28 | 575 | 49.6% | −€137.51 | −€0.24 |
+| Same model, its most confident 5% of hours | 76.7% | €0.42 | 287 | 51.9% | −€48.91 | −€0.17 |
+
+- **The patterns that looked strongest were the least real.** Rules that hit the target 71–77% of the time from January to June hit it 39–52% of the time from July to November, below the 58% needed. This is overfitting: searching many combinations always finds some that fitted the past by chance.
+- **The steadiest pattern was modest momentum:** trades in the direction of a 1.6–5.2% move over the past week hit 51.7% of the time in the search period, against 49.0% overall. Next came trades where 5 indicators agreed (51.6%) and trades in the direction of Bitcoin's past day (50.8%). None was strong enough to reach break-even, and the momentum pattern itself faded to 44.4% in the test period.
+- **No combination of the measurements gave a lasting edge.** The best out-of-sample result, the model's most confident hours, still lost €0.17 a trade.
 
 ## Skills demonstrated
 
 - **Python and pandas:** web APIs, large archive downloads, combining files, time-series indicators (EMA, MACD, RSI, ATR, ADX, Supertrend, Ichimoku, Bollinger, Donchian, OBV, VWAP)
 - **Backtesting done properly:** walk-forward (out-of-sample) testing, hindsight benchmarks, buy-and-hold benchmarks, fee and borrowing-cost modelling for long and short trades
-- **Statistics:** directional accuracy of each indicator, break-even hit rates
+- **Statistics and machine learning:** directional accuracy of each indicator, break-even hit rates, decision trees and gradient boosting (scikit-learn) with a strict time-based train/test split
 - **Data quality:** detecting a 206-hour hole between two data sources and excluding it rather than filling it with fake prices; raw data never overwritten
 - **Judgement:** avoiding multicollinearity and hindsight bias, and reporting a negative result clearly
 
@@ -110,6 +126,10 @@
 - **`paper_trader.py`:** scalping on 1-minute Bitcoin prices. Buy 0.05% below the 20-minute average; sell at +0.10%, −0.10% or after 30 minutes.
 - **`trend_trader.py`:** long/short trend-following on 15-minute prices. Uptrend when the 20-candle EMA is above the 50-candle EMA; RSI filter; stop 2 × ATR away; compared with buy-and-hold.
 
+### A counting bug, found and fixed
+
+Short trades pay borrowing fees for every 4 hours they stay open, so a short that reached its target after more than 4 hours kept €0.98 rather than €1.00. The first version counted a hit as "profit of at least €0.99", which counted those shorts as misses and understated hit rates. Hits now mean "reached the target price". Profit totals were never affected; the hit rates above and the stricter-confidence results (which choose by hit rate) are the corrected ones.
+
 ## Data-quality log
 
 | Check | Result |
@@ -129,6 +149,7 @@ py src\paper_trader.py       # scalping test
 py src\trend_trader.py       # 15-minute trend test
 py src\experiments.py       # the levers above, one at a time
 py src\funding_carry.py     # funding-rate carry study (downloads Kraken Futures funding history)
+py src\pattern_study.py     # what winning trades have in common, tested on unseen months
 streamlit run app.py         # the front end
 ```
 
@@ -158,6 +179,7 @@ If PowerShell blocks the activate script, run `Set-ExecutionPolicy -Scope Curren
 | `src/indicator_lab.py` | Walk-forward test of 10 indicators and 86 combinations with a €1 profit target, with optional trending-coins filter |
 | `src/experiments.py` | Re-runs the indicator lab with cheaper fees, different stops and a stricter confidence rule |
 | `src/funding_carry.py` | Downloads Kraken Futures funding rates and measures a carry trade (long coin + short perpetual) after costs |
+| `src/pattern_study.py` | Finds patterns in winning trades in Jan–Jun and tests them on Jul–Nov |
 | `src/paper_trader.py` | Scalping backtest on Bitcoin, at four fee levels |
 | `src/trend_trader.py` | Long/short 15-minute trend backtest on five coins, against buy-and-hold |
 
