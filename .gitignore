@@ -4,3 +4,4 @@ output/
 logs/
 .vscode/
 Claude outputs/
+data/archive/
