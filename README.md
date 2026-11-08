@@ -17,14 +17,14 @@
 1. **No indicator, alone or combined, could make €1 per trade.** Across 10 popular indicators and 86 combinations, tested week by week on prices the bot had not yet seen, every coin lost money at both fee levels. At derivatives fees, combinations lost €319 over 948 trades (€100 stake each); single indicators lost €245 over 869 trades.
 2. **The indicators are close to coin flips.** When an indicator pointed up or down, the price moved that way over the next 24 hours only 44–51% of the time for trend indicators (EMA, MACD, Supertrend, Ichimoku, ADX). The best was Bollinger Bands at 54% on XRP and Dogecoin.
 3. **A €1 target needs a high hit rate, because losing trades pay fees too.** At derivatives fees the bot must hit its target 58% of the time to break even (81% at spot fees); it managed 29–39%.
-4. **Combining indicators did not help.** Combinations lost about as much per trade as single indicators (€0.30–€0.37 against €0.25–€0.32), and traded more often. Even the best combination picked in hindsight lost money on 4 of 5 coins.
-5. **Trading only strongly trending coins cut the losses but did not make money.** Ranking coins each week by how straight their price path was (efficiency ratio) and trading only the top 2, in their trend's direction, lost €10.38 over 119 trades at derivatives fees (−€0.09 a trade, against −€0.34 for all coins). The hit rate rose from 36% to 47%, still short of the 58% needed, and the bot traded in only 10 of 210 coin-weeks, so the sample is small.
-6. **Scalping cannot beat spot fees.** One buy and one sell costs 1.6%, but the average one-minute Bitcoin move was 0.01%. Over 21 scalping trades, €100 became €70.76, with fees taking €28.52 of the €29.24 lost.
+4. **Trading only strongly trending coins cut the losses but did not make money.** Ranking coins each week by how straight their price path was (efficiency ratio) and trading only the top 2, in their trend's direction, lost €10.38 over 119 trades at derivatives fees (−€0.09 a trade, against −€0.34 for all coins). The hit rate rose from 36% to 47%, still short of the 58% needed, and the bot traded in only 10 of 210 coin-weeks, so the sample is small.
+5. **Waiting for a breakout after a volume surge did not work either.** A busy day did come before bigger moves (7.3% the next week against 5.6% otherwise), but the breakouts mostly reversed: 6 hours after a surge breakout the price was still going the same way only 37–47% of the time. Following them lost €69.89 over 185 trades at derivatives fees (−€0.38 a trade).
 
 ### Further detail
 
+- **Combining indicators did not help.** Combinations lost about as much per trade as single indicators (€0.30–€0.37 against €0.25–€0.32), and traded more often. Even the best combination picked in hindsight lost money on 4 of 5 coins.
+- **Scalping cannot beat spot fees.** One buy and one sell costs 1.6%, but the average one-minute Bitcoin move was 0.01%. Over 21 scalping trades, €100 became €70.76, with fees taking €28.52 of the €29.24 lost.
 - **Support/resistance breakouts worked best on trending coins:** the Donchian channel called the next 24 hours correctly 53.5% of the time in trending weeks, against 48.6% overall. Every other indicator stayed below 52%.
-
 - **At spot fees the lab's bot mostly refused to trade**, as designed: it traded in only 10 of 210 coin-weeks, because no combination had made money in the previous 3 weeks. The trades it did make still lost.
 - **The 15-minute trend strategy beat buy-and-hold at derivatives fees in one falling week (1–8 November)**, mainly through short trades. The 10-month hourly test above suggests this does not hold up over time.
 - **Holding was better than trading in 2026:** all five coins fell, but holding lost €9–€39 per €100, less than the indicator strategies lost on most coins.
@@ -66,7 +66,8 @@
 3. **€1 target:** every trade risks €100 and closes at the price that gives exactly €1 after fees and slippage, at a stop the same price distance away, or after 48 hours.
 4. **Walk-forward test:** each week the bot looks back 3 weeks, picks the combination that made the most there (at least 5 trades), and trades it for the next week. If nothing made money, it sits the week out.
 5. **Reachability check:** a trade is skipped if the market is too calm for the €1 move to be likely within 2 days.
-6. **Trending coins only (optional pool):** at the start of each week, coins are ranked by efficiency ratio over the previous week (net price change ÷ total distance travelled; 1 = a straight line, 0 = zig-zag). Only the top 2, with a ratio of at least 0.10, may trade that week, and only in the direction of their trend. A look-back week that touches a hole in the data counts as no trend.
+6. **Volume surge + breakout (optional pool):** a trade is allowed only when the last 24 hours' volume is at least 1.25, 1.5 or 2 times the average day of the past week, and the price closes above its 12, 24 or 48-hour high (long) or below the matching low (short). The walk-forward test picks the best of these 9 variants each week.
+7. **Trending coins only (optional pool):** at the start of each week, coins are ranked by efficiency ratio over the previous week (net price change ÷ total distance travelled; 1 = a straight line, 0 = zig-zag). Only the top 2, with a ratio of at least 0.10, may trade that week, and only in the direction of their trend. A look-back week that touches a hole in the data counts as no trend.
 
 | Output | Contents |
 |---|---|
