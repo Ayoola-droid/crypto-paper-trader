@@ -39,6 +39,12 @@ TRAIN_HOURS = 24 * 21    # look back 3 weeks to choose
 TEST_HOURS = 24 * 7      # then trade 1 week
 MIN_TRAIN_TRADES = 5     # a combination needs at least 5 trades in the look-back to be trusted
 
+# --- Trend ranking ------------------------------------------------------------
+TREND_LOOKBACK_HOURS = 24 * 7   # judge each coin's trend over the past week
+TOP_TREND_COINS = 2             # trade only the 2 most strongly trending coins that week
+MIN_EFFICIENCY = 0.10           # ...and only if their trend is at least this straight
+POOLS = ["single indicator", "combination", "combination, trending coins only"]
+
 # Indicator families. Combining two from the same family repeats the same information
 # (multicollinearity), so a combination may use at most one indicator from each family.
 FAMILIES = {
@@ -273,8 +279,14 @@ def run(signal, start, end, outcomes, reachable, cursor=0):
 # =============================================================================
 # 4. Walk-forward test
 # =============================================================================
-def walk_forward(df, signals, pool, outcomes, reachable):
-    pool_signals = {combo: combo_signal(signals, combo) for combo in pool}
+def filtered_signal(signals, combo, allowed):
+    """A combination's signal, kept only where it matches the allowed direction (if any)."""
+    sig = combo_signal(signals, combo)
+    return sig if allowed is None else np.where(sig == allowed, sig, 0)
+
+
+def walk_forward(df, signals, pool, outcomes, reachable, allowed=None):
+    pool_signals = {combo: filtered_signal(signals, combo, allowed) for combo in pool}
     windows, trades = [], []
     cursor = 0
     for test_start in range(WARMUP_HOURS + TRAIN_HOURS, len(df) - 1, TEST_HOURS):
@@ -310,52 +322,126 @@ def walk_forward(df, signals, pool, outcomes, reachable):
     return pd.DataFrame(windows), pd.DataFrame(trades)
 
 
-def hindsight_best(df, signals, pool, outcomes, reachable, start):
+def hindsight_best(df, signals, pool, outcomes, reachable, start, allowed=None):
     """The best combination over the whole test period, chosen AFTER seeing it. Not achievable."""
     best_name, best_total = None, -np.inf
     for combo in pool:
-        tr, _ = run(combo_signal(signals, combo), start, len(df) - 1, outcomes, reachable)
+        tr, _ = run(filtered_signal(signals, combo, allowed), start, len(df) - 1, outcomes, reachable)
         total = sum(t[3] for t in tr)
         if len(tr) >= MIN_TRAIN_TRADES and total > best_total:
             best_name, best_total = combo, total
+    if best_name is None:
+        return "none", 0.0
     return " + ".join(best_name), best_total
 
 
 # =============================================================================
-# 5. Main
+# 5. Trend ranking: prefer coins that are moving strongly up or down
 # =============================================================================
-def main():
-    singles, multis = build_combos()
-    print(f"Testing {len(singles)} single indicators and {len(multis)} combinations "
-          f"(at most one indicator per family)")
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    summary, all_windows, all_trades = [], [], []
+def efficiency_ratio(close, hours):
+    """How straight the price path was over the last `hours`: 1 = a straight line, 0 = pure zig-zag.
 
-    for pair in PAIRS:
+    Net change divided by the total distance travelled (Kaufman's efficiency ratio).
+    """
+    net = (close - close.shift(hours)).abs()
+    path = close.diff().abs().rolling(hours).sum()
+    return (net / path).fillna(0)
+
+
+def trend_masks(data):
+    """For every hour: +1 = this coin may only go long, -1 = only short, 0 = not trending enough.
+
+    At the start of each week, rank all coins by efficiency ratio over the past week, using only
+    prices up to that moment. The top TOP_TREND_COINS coins may trade, and only in the direction
+    of their trend; sideways coins are left alone for that week.
+    """
+    pairs = list(data)
+    n = min(len(data[p]["df"]) for p in pairs)
+    er = {}
+    for p in pairs:
+        ratio = efficiency_ratio(data[p]["df"]["close"], TREND_LOOKBACK_HOURS).to_numpy()
+        # A look-back week that touches a hole in the data gives a false reading: treat it as no trend.
+        touches_hole = pd.Series(data[p]["blocked"]).rolling(TREND_LOOKBACK_HOURS, min_periods=1).max().to_numpy() > 0
+        er[p] = np.where(touches_hole, 0.0, ratio)
+    direction = {p: np.sign((data[p]["df"]["close"] - data[p]["df"]["close"].shift(TREND_LOOKBACK_HOURS))
+                            .fillna(0).to_numpy()) for p in pairs}
+    masks = {p: np.zeros(len(data[p]["df"]), dtype=np.int8) for p in pairs}
+    ranking = []
+    for week_start in range(WARMUP_HOURS + TREND_LOOKBACK_HOURS, n, TEST_HOURS):
+        scores = sorted(pairs, key=lambda p: er[p][week_start], reverse=True)
+        top = [p for p in scores[:TOP_TREND_COINS] if er[p][week_start] >= MIN_EFFICIENCY]
+        for p in top:
+            masks[p][week_start:week_start + TEST_HOURS] = direction[p][week_start]
+        ranking.append({"week_start": data[pairs[0]]["df"]["time"].iloc[week_start],
+                        **{p: round(er[p][week_start], 3) for p in pairs},
+                        "trending": ", ".join(f"{p} {'up' if direction[p][week_start] > 0 else 'down'}"
+                                              for p in top) or "none"})
+    return masks, pd.DataFrame(ranking)
+
+
+def indicator_accuracy(df, signals, valid, horizon=24):
+    """How often each indicator's vote matched the price direction over the next `horizon` hours."""
+    future = np.sign(np.log(df["close"].shift(-horizon) / df["close"]).to_numpy())
+    rows = {}
+    for name, sig in signals.items():
+        m = (sig != 0) & valid & ~np.isnan(future)
+        rows[name] = (100 * (future[m] == sig[m]).mean()) if m.any() else np.nan
+    return rows
+
+
+# =============================================================================
+# 6. Run everything (used by the command line and by the Streamlit app)
+# =============================================================================
+def load_all(pairs):
+    """Load each coin and compute its indicators once."""
+    data = {}
+    for pair in pairs:
         df, filled, hole_hours, blocked = load_hourly(pair)
         if df is None or len(df) < WARMUP_HOURS + TRAIN_HOURS + 24:
-            print(f"{pair}: not enough hourly data. Run py src\\download_history.py first.")
             continue
-        print(f"\n{pair}: {len(df):,} hours, {df['time'].iloc[0]:%d %b %Y} to "
-              f"{df['time'].iloc[-1]:%d %b %Y}; {filled - hole_hours:,} quiet hours filled")
-        if hole_hours:
-            print(f"  Warning: {hole_hours:,} hours missing in long runs (holes in the data). "
-                  f"No trading in them or for {WARMUP_HOURS} hours after.")
         signals, atr_pct = compute_signals(df)
+        data[pair] = {"df": df, "signals": signals, "atr_pct": atr_pct, "blocked": blocked,
+                      "quiet_filled": filled - hole_hours, "hole_hours": hole_hours}
+    return data
+
+
+def run_lab(data, fee_levels, pools, progress=None):
+    """Walk-forward test for every coin, fee level and pool. Returns tables for printing or charts."""
+    singles, multis = build_combos()
+    pool_defs = {"single indicator": (singles, False), "combination": (multis, False),
+                 "combination, trending coins only": (multis, True)}
+    masks, ranking = trend_masks(data)
+    summary, all_windows, all_trades, accuracy = [], [], [], []
+    steps = len(data) * len(fee_levels) * len(pools)
+    done = 0
+
+    for pair, d in data.items():
+        df, signals = d["df"], d["signals"]
+        valid = (df["volume"].to_numpy() > 0) & ~d["blocked"]
+        trending = valid & (masks[pair] != 0)
+        for name, acc in indicator_accuracy(df, signals, valid).items():
+            accuracy.append({"pair": pair, "indicator": name, "family": FAMILIES[name],
+                             "all_hours_%": round(acc, 1),
+                             "trending_weeks_%": round(indicator_accuracy(df, {name: signals[name]},
+                                                                           trending)[name], 1)})
         test_start = WARMUP_HOURS + TRAIN_HOURS
         price_change = df["close"].iloc[-1] / df["close"].iloc[test_start] - 1
 
-        for fee_label, fee in FEE_LEVELS.items():
+        for fee_label in fee_levels:
+            fee = FEE_LEVELS[fee_label]
             outcomes, needed = precompute_outcomes(df, fee)
             # A stopped-out trade loses more than EUR 1 (fees are paid either way),
             # so the bot must hit its target more than half the time just to break even.
             stop_loss = -net_profit(1, 1.0, target_prices(1.0, fee)[1], 1, fee)
             break_even = stop_loss / (stop_loss + TARGET_PROFIT)
             # Skip a trade when the market is too calm: a typical 2-day range must exceed the move needed.
-            reachable = (atr_pct * np.sqrt(MAX_HOLD_HOURS) >= needed) & ~blocked
-            for pool_name, pool in [("single indicator", singles), ("combination", multis)]:
-                windows, trades = walk_forward(df, signals, pool, outcomes, reachable)
-                hs_name, hs_profit = hindsight_best(df, signals, pool, outcomes, reachable, test_start)
+            reachable = (d["atr_pct"] * np.sqrt(MAX_HOLD_HOURS) >= needed) & ~d["blocked"]
+            for pool_name in pools:
+                pool, use_trend = pool_defs[pool_name]
+                allowed = masks[pair] if use_trend else None
+                windows, trades = walk_forward(df, signals, pool, outcomes, reachable, allowed)
+                hs_name, hs_profit = hindsight_best(df, signals, pool, outcomes, reachable,
+                                                    test_start, allowed)
                 n = len(trades)
                 wins = int((trades["net_profit"] > 0.99).sum()) if n else 0
                 summary.append({
@@ -376,22 +462,54 @@ def main():
                 all_windows.append(windows.assign(pair=pair, fees=fee_label, pool=pool_name))
                 if n:
                     all_trades.append(trades.assign(pair=pair, fees=fee_label, pool=pool_name))
+                done += 1
+                if progress:
+                    progress(done / steps, f"{pair}, {fee_label}, {pool_name}")
 
-    if not summary:
-        raise SystemExit("No hourly data found.")
-    table = pd.DataFrame(summary)
+    return {
+        "summary": pd.DataFrame(summary),
+        "weeks": pd.concat(all_windows, ignore_index=True) if all_windows else pd.DataFrame(),
+        "trades": pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame(),
+        "accuracy": pd.DataFrame(accuracy),
+        "ranking": ranking,
+    }
+
+
+def main():
+    singles, multis = build_combos()
+    print(f"Testing {len(singles)} single indicators and {len(multis)} combinations "
+          f"(at most one indicator per family)")
+    data = load_all(PAIRS)
+    if not data:
+        raise SystemExit("Not enough hourly data. Run py src\\download_history.py first.")
+    for pair, d in data.items():
+        df = d["df"]
+        print(f"{pair}: {len(df):,} hours, {df['time'].iloc[0]:%d %b %Y} to "
+              f"{df['time'].iloc[-1]:%d %b %Y}; {d['quiet_filled']:,} quiet hours filled")
+        if d["hole_hours"]:
+            print(f"  Warning: {d['hole_hours']:,} hours missing in long runs (holes in the data). "
+                  f"No trading in them, for {MAX_HOLD_HOURS} hours before or {WARMUP_HOURS} hours after.")
+
+    results = run_lab(data, list(FEE_LEVELS), POOLS)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     OUTPUT_DIR.mkdir(exist_ok=True)
-    table.to_csv(OUTPUT_DIR / f"lab_summary_{stamp}.csv", index=False)
-    pd.concat(all_windows).to_csv(OUTPUT_DIR / f"lab_weeks_{stamp}.csv", index=False)
-    if all_trades:
-        pd.concat(all_trades).to_csv(OUTPUT_DIR / f"lab_trades_{stamp}.csv", index=False)
+    for name, table in results.items():
+        table.to_csv(OUTPUT_DIR / f"lab_{name}_{stamp}.csv", index=False)
 
-    show = ["pair", "pool", "move_needed_%", "weeks_traded", "trades", "hit_rate_%", "break_even_%",
+    table = results["summary"]
+    show = ["pair", "pool", "weeks_traded", "trades", "hit_rate_%", "break_even_%",
             "profit_EUR", "per_trade_EUR", "hindsight_best_EUR", "buy_hold_EUR"]
     for fee_label in FEE_LEVELS:
         print(f"\n=== Out-of-sample results, {fee_label} fees (EUR 100 per trade) ===")
         print(table[table["fees"] == fee_label][show].to_string(index=False))
-    print(f"\nSaved: output/lab_summary_{stamp}.csv, lab_weeks_{stamp}.csv, lab_trades_{stamp}.csv")
+
+    acc = results["accuracy"].pivot(index="indicator", columns="pair", values="all_hours_%")
+    print("\n=== How often each indicator called the next 24 hours' direction correctly (%) ===")
+    print(acc.to_string())
+    trend_acc = results["accuracy"].groupby("indicator")[["all_hours_%", "trending_weeks_%"]].mean().round(1)
+    print("\n=== Average accuracy: all hours vs weeks when the coin was among the strongest trends ===")
+    print(trend_acc.to_string())
+    print(f"\nSaved: output/lab_*_{stamp}.csv (summary, weeks, trades, accuracy, ranking)")
 
 
 if __name__ == "__main__":
