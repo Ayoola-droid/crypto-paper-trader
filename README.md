@@ -2,7 +2,7 @@
 
 **Business question:** Can an automated bot make money trading crypto with €100 once real exchange fees, borrowing costs and slippage are counted? And can popular technical indicators, alone or combined, predict price moves well enough to make €1 on every trade?
 
-**Data:** 10 months of hourly prices (January to November 2026) plus 1-minute and 15-minute prices for Bitcoin, Ether, Solana, XRP and Dogecoin in euro, from [Kraken's quarterly archives](https://support.kraken.com/articles/360047124832-downloadable-historical-ohlcvt-open-high-low-close-volume-trades-data) and [public API](https://docs.kraken.com/api/docs/rest-api/get-ohlc-data). Fees from [Kraken's spot fee schedule](https://www.kraken.com/features/fee-schedule) (checked 4 November 2026) and [derivatives fees](https://support.kraken.com/articles/360048917612).
+**Data:** 10 months of hourly prices (January to November 2026) plus 1-minute and 15-minute prices for Bitcoin, Ether, Solana, XRP and Dogecoin in euro, from [Kraken's quarterly archives](https://support.kraken.com/articles/360047124832-downloadable-historical-ohlcvt-open-high-low-close-volume-trades-data) and [public API](https://docs.kraken.com/api/docs/rest-api/get-ohlc-data). Fees from [Kraken's spot fee schedule](https://www.kraken.com/features/fee-schedule) (checked 4 November 2026) and [derivatives fees](https://support.kraken.com/articles/360048917612). Macro series and daily Bitcoin/Ether prices since 2015 from [FRED](https://fred.stlouisfed.org/); US release dates from the [Federal Reserve](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm) and the [Bureau of Labor Statistics](https://www.bls.gov/bls/news-release/cpi.htm).
 
 **Tools:** Python (pandas, NumPy, requests, scikit-learn), Streamlit, Plotly
 
@@ -65,6 +65,29 @@ Every hour, for every coin, the study imagines a long and a short trade with the
 - **The patterns that looked strongest were the least real.** Rules that hit the target 71–77% of the time from January to June hit it 39–52% of the time from July to November, below the 58% needed. This is overfitting: searching many combinations always finds some that fitted the past by chance.
 - **The steadiest pattern was modest momentum:** trades in the direction of a 1.6–5.2% move over the past week hit 51.7% of the time in the search period, against 49.0% overall. Next came trades where 5 indicators agreed (51.6%) and trades in the direction of Bitcoin's past day (50.8%). None was strong enough to reach break-even, and the momentum pattern itself faded to 44.4% in the test period.
 - **No combination of the measurements gave a lasting edge.** The best out-of-sample result, the model's most confident hours, still lost €0.17 a trade.
+
+## Macro factors (`src/macro_study.py`)
+
+**A. US economic releases.** Official dates of interest-rate decisions (FOMC), inflation figures (CPI) and jobs reports are in `data/macro/events.csv`, with the source of each.
+- Prices moved 1.1–1.6 times more in the release hour than in the same hour on other weekdays; Ether, Solana and XRP reacted most to inflation and jobs figures.
+- Possible trades that ran through a release hit the €1 target 44.9% of the time, against 48.9% for the rest.
+- A rule fixed in advance, no new trades from 24 hours before to 2 hours after a release, improved the bot from −€0.30 to −€0.27 a trade (2,226 trades, −€596.52). A small, honest improvement, but still a loss.
+
+**B. Macro regimes.** US tech stocks (Nasdaq), the dollar, the US interest rate and money supply, from [FRED](https://fred.stlouisfed.org/), were added to the pattern study, each as it was known at the time (money supply delayed 55 days for publication).
+- Each measurement moved the January–June win rate by only 1–2 points.
+- With macro added, the model looked better in the search period (82% hit rate in its most confident hours) and worse on July–November (47.6%, −€0.27 a trade, against −€0.17 without macro). More measurements gave it more ways to fit the past by chance.
+
+**C. Seasonality**, with Coinbase daily prices from FRED: patterns found in 2015–2020, checked in 2021–2026.
+
+| | Bitcoin | Ether |
+|---|---|---|
+| Agreement of the 12 monthly averages between the two periods | −0.35 | +0.08 |
+| Agreement of the 7 weekday averages | −0.26 | +0.21 |
+| Holding only in the 6 best months of 2015–2020, during 2021–2026, after spot fees | −5% | +78% |
+| Holding all along, 2021–2026 | +161% | +202% |
+
+- Good and bad months did not repeat: for Bitcoin the pattern even reversed. Weekday patterns did not hold either.
+- Bitcoin's return in the second year after a halving was +166%, −49% and −13% in the three cycles: no consistent cycle, and three cycles are too few to tell.
 
 ## Skills demonstrated
 
@@ -150,6 +173,8 @@ py src\trend_trader.py       # 15-minute trend test
 py src\experiments.py       # the levers above, one at a time
 py src\funding_carry.py     # funding-rate carry study (downloads Kraken Futures funding history)
 py src\pattern_study.py     # what winning trades have in common, tested on unseen months
+py src\download_macro.py    # FRED: Bitcoin/Ether since 2015, Nasdaq, dollar, interest rate, money supply
+py src\macro_study.py       # economic releases, macro regimes and seasonality
 streamlit run app.py         # the front end
 ```
 
@@ -180,6 +205,8 @@ If PowerShell blocks the activate script, run `Set-ExecutionPolicy -Scope Curren
 | `src/experiments.py` | Re-runs the indicator lab with cheaper fees, different stops and a stricter confidence rule |
 | `src/funding_carry.py` | Downloads Kraken Futures funding rates and measures a carry trade (long coin + short perpetual) after costs |
 | `src/pattern_study.py` | Finds patterns in winning trades in Jan–Jun and tests them on Jul–Nov |
+| `src/download_macro.py` | Downloads macro series and long Bitcoin/Ether history from FRED |
+| `src/macro_study.py` | Tests US economic releases, macro regimes and seasonality |
 | `src/paper_trader.py` | Scalping backtest on Bitcoin, at four fee levels |
 | `src/trend_trader.py` | Long/short 15-minute trend backtest on five coins, against buy-and-hold |
 
@@ -191,6 +218,7 @@ crypto-paper-trader/
 ├── data/
 │   ├── history/       hourly prices from Kraken's quarterly archives
 │   ├── funding/       Kraken Futures funding rates
+│   ├── macro/         FRED series and the official US release calendar (events.csv)
 │   ├── raw/           one CSV per coin, candle size and API download; never edited
 │   └── archive/       temporary ZIP downloads (not committed)
 ├── output/            results and trade logs (not committed)
