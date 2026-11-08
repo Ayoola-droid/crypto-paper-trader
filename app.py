@@ -23,8 +23,14 @@ THEME = {
     "gain": "#3987E5", "loss": "#E66767", "neutral": "#383835",
 }
 # Each pool keeps its colour whatever is selected (colour follows the entity, not its position).
+# Checked with a colour-blind simulator: the four pass as neighbouring bars. Lines and dots also get
+# their own dash style and marker shape, so no two options are told apart by colour alone.
 POOL_COLOURS = {"single indicator": "#3987E5", "combination": "#D95926",
-                "combination, trending coins only": "#199E70"}
+                "combination, trending coins only": "#199E70", "volume surge + breakout": "#C98500"}
+POOL_DASH = {"single indicator": "solid", "combination": "dash",
+             "combination, trending coins only": "dot", "volume surge + breakout": "dashdot"}
+POOL_SYMBOL = {"single indicator": "circle", "combination": "square",
+               "combination, trending coins only": "diamond", "volume surge + breakout": "triangle-up"}
 COIN_NAMES = {"XBTEUR": "Bitcoin", "ETHEUR": "Ether", "SOLEUR": "Solana",
               "XRPEUR": "XRP", "XDGEUR": "Dogecoin"}
 
@@ -217,16 +223,16 @@ with tab_results:
     for pool in pools:
         part = summary[(summary["pool"] == pool) & (summary["trades"] > 0)]
         fig.add_scatter(x=[COIN_NAMES[p] for p in part["pair"]], y=part["hit_rate_%"], mode="markers",
-                        name=pool, marker=dict(size=13, color=POOL_COLOURS[pool],
+                        name=pool, marker=dict(size=13, color=POOL_COLOURS[pool], symbol=POOL_SYMBOL[pool],
                                                line=dict(width=2, color=THEME["surface"])),
                         customdata=part["trades"],
                         hovertemplate="%{x}: %{y}% of %{customdata} trades hit the target<extra>" + pool + "</extra>")
-    fig.add_hline(y=break_even, line_color=THEME["accent"], line_width=2,
+    fig.add_hline(y=break_even, line_color=THEME["ink"], line_width=1.5,
                   annotation_text=f"break-even {break_even:.0f}%", annotation_position="top left",
-                  annotation_font_color=THEME["accent"])
+                  annotation_font_color=THEME["ink"])
     st.plotly_chart(chart_layout(fig, height=320, y_title="% of trades"), width="stretch")
     st.caption("A losing trade costs more than a winning trade earns, because fees are paid either way. "
-               "Dots below the amber line lose money overall.")
+               "Dots below the break-even line lose money overall.")
     with st.expander("Table view"):
         st.dataframe(summary.drop(columns=["fees"]), hide_index=True, width="stretch")
 
@@ -237,7 +243,7 @@ with tab_weeks:
     for pool in pools:
         part = weeks[weeks["pool"] == pool].groupby("week_start")["week_profit"].sum().cumsum()
         fig.add_scatter(x=part.index, y=part.values, mode="lines", name=pool,
-                        line=dict(color=POOL_COLOURS[pool], width=2),
+                        line=dict(color=POOL_COLOURS[pool], width=2, dash=POOL_DASH[pool]),
                         hovertemplate="week of %{x|%d %b}: €%{y:.2f} so far<extra>" + pool + "</extra>")
     fig.update_layout(hovermode="x unified")
     st.plotly_chart(chart_layout(fig, y_title="EUR"), width="stretch")
