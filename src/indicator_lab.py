@@ -27,7 +27,18 @@ TARGET_PROFIT = 1.0      # euro after all costs
 SLIPPAGE = 0.0005        # 0.05% per buy or sell: higher than before, as XRP and DOGE trade thinly
 MARGIN_OPEN_FEE = 0.0002         # shorts: 0.02% to borrow
 MARGIN_ROLLOVER_FEE = 0.0002     # shorts: 0.02% per 4 hours
-FEE_LEVELS = {"spot 0.80%": 0.0080, "derivatives 0.05%": 0.0005}
+# Fee per leg of a trade. "Maker" levels use limit orders for the entry and the EUR 1 target:
+# they pay the lower maker fee and no slippage, but an entry only fills if the price comes back
+# to it in the next hour. Stops and time exits are always market orders (taker fee + slippage).
+FEE_LEVELS = {
+    "spot 0.80%": {"entry": 0.0080, "target": 0.0080, "stop": 0.0080, "limit_orders": False},
+    "derivatives 0.05%": {"entry": 0.0005, "target": 0.0005, "stop": 0.0005, "limit_orders": False},
+    "spot maker 0.40%": {"entry": 0.0040, "target": 0.0040, "stop": 0.0080, "limit_orders": True},
+    "derivatives maker 0.02%": {"entry": 0.0002, "target": 0.0002, "stop": 0.0005, "limit_orders": True},
+}
+STOP_MULTIPLE = 1.0      # stop distance = this x the distance to the EUR 1 target (1 = same distance)
+PICKY_MARGIN = None      # e.g. 0.05: only trust a combination whose look-back hit rate beat break-even by 5 points
+PICKY_MIN_TRADES = 10    # ...over at least this many look-back trades
 
 # --- Trade rules -------------------------------------------------------------
 MAX_HOLD_HOURS = 48      # close the trade after 2 days if neither target nor stop is hit
@@ -44,12 +55,14 @@ TREND_LOOKBACK_HOURS = 24 * 7   # judge each coin's trend over the past week
 TOP_TREND_COINS = 2             # trade only the 2 most strongly trending coins that week
 MIN_EFFICIENCY = 0.10           # ...and only if their trend is at least this straight
 POOLS = ["single indicator", "combination", "combination, trending coins only",
-         "volume surge + breakout"]
+         "volume surge + breakout", "fade surge breakout"]
 
 # --- Volume surge + breakout -----------------------------------------------------
 # A busy day (volume well above its weekly average) tends to come before a bigger move, but
 # not in a predictable direction. So: wait for the surge, let the price break its recent high
 # (resistance) or low (support), and follow the break. The test picks the best variant each week.
+# "Fade surge breakout" bets the other way (that the break fails). That idea came from looking at
+# these same 10 months, so its result here is biased upwards: it needs new data to confirm it.
 BREAKOUT_HOURS = [12, 24, 48]        # how far back the high/low (resistance/support) is measured
 SURGE_LEVELS = [1.25, 1.5, 2.0]      # last 24h volume vs the average day of the past week
 
@@ -228,41 +241,65 @@ def combo_signal(signals, combo):
 # =============================================================================
 # 3. Trade outcomes
 # =============================================================================
-def target_prices(entry, fee):
-    """Prices at which a trade makes exactly EUR 1 after costs, and the matching stop."""
-    s, p = SLIPPAGE, TARGET_PROFIT / STAKE
-    long_tp = entry * (1 + p) * (1 + s) / ((1 - fee) ** 2 * (1 - s))
-    k = (1 + s) * (1 + fee) / (1 - s)
+def leg_costs(fees):
+    """Fee and slippage for entering, for exiting at the target, and for exiting at a stop."""
+    limit = fees["limit_orders"]
+    entry = (fees["entry"], 0.0 if limit else SLIPPAGE)
+    target = (fees["target"], 0.0 if limit else SLIPPAGE)
+    stop = (fees["stop"], SLIPPAGE)
+    return entry, target, stop
+
+
+def target_prices(entry, fees):
+    """Prices at which a trade makes exactly the target profit after costs, and the matching stops."""
+    (fi, si), (fo, so), _ = leg_costs(fees)
+    p = TARGET_PROFIT / STAKE
+    long_tp = entry * (1 + p) * (1 + si) / ((1 - fi) * (1 - fo) * (1 - so))
+    k = (1 + so) * (1 + fo) / (1 - si)
     borrow = MARGIN_OPEN_FEE + MARGIN_ROLLOVER_FEE
-    short_tp = entry * (1 - (p + fee + borrow) / (1 - fee)) / k
-    long_sl = entry - (long_tp - entry)
-    short_sl = entry + (entry - short_tp)
+    short_tp = entry * (1 - (p + fi + borrow) / (1 - fi)) / k
+    long_sl = entry - STOP_MULTIPLE * (long_tp - entry)
+    short_sl = entry + STOP_MULTIPLE * (entry - short_tp)
     return long_tp, long_sl, short_tp, short_sl
 
 
-def net_profit(side, entry, exit_price, hours, fee):
-    s = SLIPPAGE
+def net_profit(side, entry, exit_price, hours, fee_in, fee_out, slip_in=SLIPPAGE, slip_out=SLIPPAGE):
     if side == 1:
-        units = STAKE * (1 - fee) / (entry * (1 + s))
-        return units * exit_price * (1 - s) * (1 - fee) - STAKE
-    sell_fill, buy_fill = entry * (1 - s), exit_price * (1 + s)
-    units = STAKE * (1 - fee) / sell_fill
+        units = STAKE * (1 - fee_in) / (entry * (1 + slip_in))
+        return units * exit_price * (1 - slip_out) * (1 - fee_out) - STAKE
+    sell_fill, buy_fill = entry * (1 - slip_in), exit_price * (1 + slip_out)
+    units = STAKE * (1 - fee_in) / sell_fill
     borrow = STAKE * (MARGIN_OPEN_FEE + MARGIN_ROLLOVER_FEE * np.ceil(hours / 4))
-    return -STAKE * fee + units * (sell_fill - buy_fill) - units * buy_fill * fee - borrow
+    return -STAKE * fee_in + units * (sell_fill - buy_fill) - units * buy_fill * fee_out - borrow
 
 
-def precompute_outcomes(df, fee):
+def break_even_rate(fees):
+    """Share of trades that must hit the target to break even, given what a stopped-out trade loses."""
+    (fi, si), _, (fs, ss) = leg_costs(fees)
+    loss = -net_profit(1, 1.0, target_prices(1.0, fees)[1], 1, fi, fs, si, ss)
+    return loss / (loss + TARGET_PROFIT)
+
+
+def precompute_outcomes(df, fees):
     """For every hour, what happens if we go long or short there? (Same for every combination.)"""
     high, low, close = df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy()
+    (fi, si), (ft, st), (fs, ss) = leg_costs(fees)
+    limit = fees["limit_orders"]
     n = len(close)
     result = {}
     for side in (1, -1):
         exit_idx = np.zeros(n, dtype=int)
         profit = np.zeros(n)
         reason = np.empty(n, dtype=object)
+        filled = np.ones(n, dtype=bool)
         for i in range(n - 1):
             entry = close[i]
-            long_tp, long_sl, short_tp, short_sl = target_prices(entry, fee)
+            if limit:
+                # A limit order at this price fills only if the next hour trades back to it.
+                filled[i] = low[i + 1] <= entry if side == 1 else high[i + 1] >= entry
+                if not filled[i]:
+                    continue
+            long_tp, long_sl, short_tp, short_sl = target_prices(entry, fees)
             last = min(i + MAX_HOLD_HOURS, n - 1)
             hi, lo = high[i + 1:last + 1], low[i + 1:last + 1]
             if side == 1:
@@ -271,19 +308,22 @@ def precompute_outcomes(df, fee):
             else:
                 tp, sl = short_tp, short_sl
                 hit_sl, hit_tp = hi >= sl, lo <= tp
+            if limit:
+                hit_tp = hit_tp.copy()
+                hit_tp[0] = False      # filled during that hour: don't assume the target came after
             first_sl = hit_sl.argmax() if hit_sl.any() else len(hi)
             first_tp = hit_tp.argmax() if hit_tp.any() else len(hi)
             if first_sl <= first_tp and first_sl < len(hi):     # same hour: assume stop first
-                j, price, why = i + 1 + first_sl, sl, "stop loss"
+                j, price, why, fo, so = i + 1 + first_sl, sl, "stop loss", fs, ss
             elif first_tp < len(hi):
-                j, price, why = i + 1 + first_tp, tp, "EUR 1 target"
+                j, price, why, fo, so = i + 1 + first_tp, tp, "EUR 1 target", ft, st
             else:
-                j, price, why = last, close[last], "time limit"
+                j, price, why, fo, so = last, close[last], "time limit", fs, ss
             exit_idx[i], reason[i] = j, why
-            profit[i] = net_profit(side, entry, price, j - i, fee)
-        result[side] = (exit_idx, profit, reason)
-    # The move needed for EUR 1, as a fraction of the price
-    needed = target_prices(1.0, fee)[0] - 1.0
+            profit[i] = net_profit(side, entry, price, j - i, fi, fo, si, so)
+        result[side] = (exit_idx, profit, reason, filled)
+    # The move needed for the target, as a fraction of the price
+    needed = target_prices(1.0, fees)[0] - 1.0
     return result, needed
 
 
@@ -295,7 +335,9 @@ def run(signal, start, end, outcomes, reachable, cursor=0):
         if i < cursor:
             continue
         side = int(signal[i])
-        exit_idx, profit, reason = outcomes[side]
+        exit_idx, profit, reason, filled = outcomes[side]
+        if not filled[i]:          # a limit order the price never came back to: no trade
+            continue
         trades.append((i, side, exit_idx[i], profit[i], reason[i]))
         cursor = exit_idx[i] + 1
     return trades, cursor
@@ -310,7 +352,7 @@ def filtered_signal(signals, combo, allowed):
     return sig if allowed is None else np.where(sig == allowed, sig, 0)
 
 
-def walk_forward(df, signals, pool, outcomes, reachable, allowed=None):
+def walk_forward(df, signals, pool, outcomes, reachable, allowed=None, min_hit_rate=None):
     pool_signals = {combo: filtered_signal(signals, combo, allowed) for combo in pool}
     windows, trades = [], []
     cursor = 0
@@ -322,6 +364,12 @@ def walk_forward(df, signals, pool, outcomes, reachable, allowed=None):
         for combo, sig in pool_signals.items():
             train_trades, _ = run(sig, train_start, test_start, outcomes, reachable)
             total = sum(t[3] for t in train_trades)
+            if min_hit_rate is not None:     # stricter rule: enough trades AND a hit rate above break-even
+                if len(train_trades) < PICKY_MIN_TRADES:
+                    continue
+                hits = sum(t[3] > 0.99 * TARGET_PROFIT for t in train_trades)
+                if hits / len(train_trades) < min_hit_rate:
+                    continue
             if len(train_trades) >= MIN_TRAIN_TRADES and total > best_profit:
                 best, best_profit, best_count = combo, total, len(train_trades)
 
@@ -437,7 +485,8 @@ def run_lab(data, fee_levels, pools, progress=None):
     breakout_pool = [(name,) for name in next(iter(data.values()))["breakouts"]]
     pool_defs = {"single indicator": (singles, False), "combination": (multis, False),
                  "combination, trending coins only": (multis, True),
-                 "volume surge + breakout": (breakout_pool, False)}
+                 "volume surge + breakout": (breakout_pool, False),
+                 "fade surge breakout": (breakout_pool, False)}
     masks, ranking = trend_masks(data)
     summary, all_windows, all_trades, accuracy = [], [], [], []
     steps = len(data) * len(fee_levels) * len(pools)
@@ -456,19 +505,20 @@ def run_lab(data, fee_levels, pools, progress=None):
         price_change = df["close"].iloc[-1] / df["close"].iloc[test_start] - 1
 
         for fee_label in fee_levels:
-            fee = FEE_LEVELS[fee_label]
-            outcomes, needed = precompute_outcomes(df, fee)
+            fees = FEE_LEVELS[fee_label]
+            outcomes, needed = precompute_outcomes(df, fees)
             # A stopped-out trade loses more than EUR 1 (fees are paid either way),
             # so the bot must hit its target more than half the time just to break even.
-            stop_loss = -net_profit(1, 1.0, target_prices(1.0, fee)[1], 1, fee)
-            break_even = stop_loss / (stop_loss + TARGET_PROFIT)
+            break_even = break_even_rate(fees)
+            min_hit = None if PICKY_MARGIN is None else break_even + PICKY_MARGIN
             # Skip a trade when the market is too calm: a typical 2-day range must exceed the move needed.
             reachable = (d["atr_pct"] * np.sqrt(MAX_HOLD_HOURS) >= needed) & ~d["blocked"]
             for pool_name in pools:
                 pool, use_trend = pool_defs[pool_name]
-                source = d["breakouts"] if pool_name == "volume surge + breakout" else signals
+                source = {"volume surge + breakout": d["breakouts"],
+                          "fade surge breakout": {k: -v for k, v in d["breakouts"].items()}}.get(pool_name, signals)
                 allowed = masks[pair] if use_trend else None
-                windows, trades = walk_forward(df, source, pool, outcomes, reachable, allowed)
+                windows, trades = walk_forward(df, source, pool, outcomes, reachable, allowed, min_hit)
                 hs_name, hs_profit = hindsight_best(df, source, pool, outcomes, reachable,
                                                     test_start, allowed)
                 n = len(trades)
@@ -486,7 +536,7 @@ def run_lab(data, fee_levels, pools, progress=None):
                     "per_trade_EUR": round(trades["net_profit"].mean(), 2) if n else 0.0,
                     "hindsight_best_EUR": round(hs_profit, 2),
                     "hindsight_best": hs_name,
-                    "buy_hold_EUR": round(STAKE * (1 + price_change) * (1 - fee) ** 2 - STAKE, 2),
+                    "buy_hold_EUR": round(STAKE * (1 + price_change) * (1 - fees["stop"]) ** 2 - STAKE, 2),
                 })
                 all_windows.append(windows.assign(pair=pair, fees=fee_label, pool=pool_name))
                 if n:
