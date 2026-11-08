@@ -65,7 +65,7 @@ def build_dataset(data, fees):
             "volume_vs_week": v.rolling(24).sum() / (v.rolling(24 * 7).sum() / 7).replace(0, np.nan),
             "band_width_rank": bw.rolling(24 * 30).rank(pct=True),
             "btc_24h": 100 * btc_24h[:len(df)],
-            "hour_utc": df["time"].dt.hour, "weekday": df["time"].dt.weekday,
+            "hour_utc": df["time"].dt.hour, "weekday": df["time"].dt.day_of_week,
             "up_votes": np.sum([s == 1 for s in sig.values()], axis=0),
             "down_votes": np.sum([s == -1 for s in sig.values()], axis=0),
         })
