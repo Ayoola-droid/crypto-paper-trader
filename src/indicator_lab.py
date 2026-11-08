@@ -43,7 +43,15 @@ MIN_TRAIN_TRADES = 5     # a combination needs at least 5 trades in the look-bac
 TREND_LOOKBACK_HOURS = 24 * 7   # judge each coin's trend over the past week
 TOP_TREND_COINS = 2             # trade only the 2 most strongly trending coins that week
 MIN_EFFICIENCY = 0.10           # ...and only if their trend is at least this straight
-POOLS = ["single indicator", "combination", "combination, trending coins only"]
+POOLS = ["single indicator", "combination", "combination, trending coins only",
+         "volume surge + breakout"]
+
+# --- Volume surge + breakout -----------------------------------------------------
+# A busy day (volume well above its weekly average) tends to come before a bigger move, but
+# not in a predictable direction. So: wait for the surge, let the price break its recent high
+# (resistance) or low (support), and follow the break. The test picks the best variant each week.
+BREAKOUT_HOURS = [12, 24, 48]        # how far back the high/low (resistance/support) is measured
+SURGE_LEVELS = [1.25, 1.5, 2.0]      # last 24h volume vs the average day of the past week
 
 # Indicator families. Combining two from the same family repeats the same information
 # (multicollinearity), so a combination may use at most one indicator from each family.
@@ -184,6 +192,23 @@ def compute_signals(df):
         arr[:WARMUP_HOURS] = 0
         out[name] = arr
     return out, (atr / c).to_numpy()
+
+
+def breakout_signals(df):
+    """One signal per variant: +1/-1 when the price breaks out during a volume surge, else 0."""
+    c, h, l, v = df["close"], df["high"], df["low"], df["volume"]
+    daily_avg = v.rolling(24 * 7).sum() / 7
+    surge = (v.rolling(24).sum() / daily_avg.replace(0, np.nan)).to_numpy()
+    out = {}
+    for hours in BREAKOUT_HOURS:
+        up = (c > h.rolling(hours).max().shift()).to_numpy()
+        down = (c < l.rolling(hours).min().shift()).to_numpy()
+        for level in SURGE_LEVELS:
+            busy = np.nan_to_num(surge) >= level
+            sig = np.where(busy & up, 1, np.where(busy & down, -1, 0)).astype(np.int8)
+            sig[:WARMUP_HOURS + 24 * 7] = 0
+            out[f"Breakout {hours}h, volume x{level:g}"] = sig
+    return out
 
 
 def build_combos():
@@ -400,7 +425,8 @@ def load_all(pairs):
         if df is None or len(df) < WARMUP_HOURS + TRAIN_HOURS + 24:
             continue
         signals, atr_pct = compute_signals(df)
-        data[pair] = {"df": df, "signals": signals, "atr_pct": atr_pct, "blocked": blocked,
+        data[pair] = {"df": df, "signals": signals, "breakouts": breakout_signals(df),
+                      "atr_pct": atr_pct, "blocked": blocked,
                       "quiet_filled": filled - hole_hours, "hole_hours": hole_hours}
     return data
 
@@ -408,8 +434,10 @@ def load_all(pairs):
 def run_lab(data, fee_levels, pools, progress=None):
     """Walk-forward test for every coin, fee level and pool. Returns tables for printing or charts."""
     singles, multis = build_combos()
+    breakout_pool = [(name,) for name in next(iter(data.values()))["breakouts"]]
     pool_defs = {"single indicator": (singles, False), "combination": (multis, False),
-                 "combination, trending coins only": (multis, True)}
+                 "combination, trending coins only": (multis, True),
+                 "volume surge + breakout": (breakout_pool, False)}
     masks, ranking = trend_masks(data)
     summary, all_windows, all_trades, accuracy = [], [], [], []
     steps = len(data) * len(fee_levels) * len(pools)
@@ -438,9 +466,10 @@ def run_lab(data, fee_levels, pools, progress=None):
             reachable = (d["atr_pct"] * np.sqrt(MAX_HOLD_HOURS) >= needed) & ~d["blocked"]
             for pool_name in pools:
                 pool, use_trend = pool_defs[pool_name]
+                source = d["breakouts"] if pool_name == "volume surge + breakout" else signals
                 allowed = masks[pair] if use_trend else None
-                windows, trades = walk_forward(df, signals, pool, outcomes, reachable, allowed)
-                hs_name, hs_profit = hindsight_best(df, signals, pool, outcomes, reachable,
+                windows, trades = walk_forward(df, source, pool, outcomes, reachable, allowed)
+                hs_name, hs_profit = hindsight_best(df, source, pool, outcomes, reachable,
                                                     test_start, allowed)
                 n = len(trades)
                 wins = int((trades["net_profit"] > 0.99).sum()) if n else 0
