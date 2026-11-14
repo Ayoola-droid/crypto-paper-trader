@@ -15,6 +15,7 @@ PROJECT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_DIR / "src"))
 import fetch_prices  # noqa: E402
 import indicator_lab as lab  # noqa: E402
+import trade_tools as tools  # noqa: E402
 
 # --- Theme: one place for every colour (matches .streamlit/config.toml) ------
 THEME = {
@@ -81,6 +82,11 @@ st.markdown(f"""
 def euro(value):
     """Format money with the minus sign in front: -EUR 5.20 rather than EUR -5.20."""
     return f"{'−' if value < 0 else ''}€{abs(value):,.2f}"
+
+
+def price(value):
+    """Prices from Bitcoin (EUR 68,000) to Dogecoin (EUR 0.15), each with sensible decimals."""
+    return f"€{value:,.0f}" if value >= 1000 else (f"€{value:,.2f}" if value >= 1 else f"€{value:.4f}")
 
 
 def chart_layout(fig, height=380, y_title=None, x_title=None):
@@ -215,8 +221,9 @@ not seen yet, aiming for €{target:g} after fees on every €100 trade. These a
 </div>
 """, unsafe_allow_html=True)
 
-tab_results, tab_weeks, tab_trades, tab_ind, tab_trend = st.tabs(
-    ["Results", "Week by week", "Trades on the chart", "Indicator accuracy", "Trend ranking"])
+tab_results, tab_weeks, tab_trades, tab_ind, tab_trend, tab_tm, tab_risk = st.tabs(
+    ["Results", "Week by week", "Trades on the chart", "Indicator accuracy", "Trend ranking",
+     "Time Machine", "Risk manager"])
 
 # --- Results ------------------------------------------------------------------
 with tab_results:
@@ -342,3 +349,83 @@ with tab_trend:
         "trending": st.column_config.TextColumn("Traded that week", width="medium"),
         **{p: st.column_config.ProgressColumn(COIN_NAMES[p], min_value=0, max_value=100, format="%d")
            for p in pairs if p in show.columns}})
+
+# --- Time Machine -----------------------------------------------------------------
+with tab_tm:
+    st.markdown("#### Replay a trade before taking it")
+    st.caption("Opens a pretend trade at the latest hourly close, then replays the next 48 hours 10,000 times, "
+               "each hour drawn from this coin's own last 60 days at a similar time of day. It counts how often "
+               f"the €{target:g} target or the stop comes first. A simulation from recent prices, not a prediction. "
+               "Idea from the MIT-licensed day-trader-skill pack.")
+    c1, c2 = st.columns(2)
+    coin_m = c1.selectbox("Coin", pairs, format_func=lambda p: COIN_NAMES[p], key="tm_coin")
+    side_m = c2.radio("Trade", ["long (bet on a rise)", "short (bet on a fall)"], horizontal=True, key="tm_side")
+    side = 1 if side_m.startswith("long") else -1
+    fees_m = lab.FEE_LEVELS[fee]
+    tm = tools.time_machine(data[coin_m]["df"], side, fees_m)
+    hist = tools.history_check(data[coin_m]["df"], side, fees_m)
+    share, be = tm["target_share_of_decided_%"], tm["break_even_%"]
+    st.markdown(f"""
+<div class="tiles">
+  <div class="tile"><div class="label">Target first</div><div class="value">{tm['target_first_%']:.0f}%</div>
+    <div class="note">{price(tm['target'])} · needs {be:.0f}% to break even</div></div>
+  <div class="tile"><div class="label">Stop first</div><div class="value">{tm['stop_first_%']:.0f}%</div>
+    <div class="note">{price(tm['stop'])} · entry {price(tm['entry'])}</div></div>
+  <div class="tile"><div class="label">Neither in 48 hours</div><div class="value">{tm['neither_%']:.0f}%</div>
+    <div class="note">closed at the 48-hour price</div></div>
+  <div class="tile"><div class="label">Same trade, every hour of the last 60 days</div>
+    <div class="value">{hist['target_%']:.0f}%</div><div class="note">hit the target · {euro(hist['avg_profit'])} a trade on average</div></div>
+</div>""", unsafe_allow_html=True)
+    st.markdown(f"**Verdict:** {tools.verdict(share, be)}")
+    end = tm["end_prices"]
+    fig = go.Figure(go.Histogram(x=end, nbinsx=60, marker_color=THEME["muted"], marker_line_width=0,
+                                 hovertemplate="€%{x:,.4g}: %{y} replays<extra></extra>", name="replays"))
+    for value, label, colour, dash in [(tm["entry"], "entry", THEME["ink"], "solid"),
+                                       (tm["target"], "target", THEME["gain"], "dash"),
+                                       (tm["stop"], "stop", THEME["loss"], "dot")]:
+        fig.add_vline(x=value, line_color=colour, line_width=2, line_dash=dash,
+                      annotation_text=label, annotation_font_color=colour)
+    st.plotly_chart(chart_layout(fig, height=340, x_title="price where each replay ended (EUR)", y_title="replays"),
+                    width="stretch")
+    st.caption("The tall bars at the target and the stop are the replays that closed there; "
+               "the spread in between is where the rest stood after 48 hours.")
+    votes = {name: int(sig[-1]) for name, sig in data[coin_m]["signals"].items()}
+    agree = [n for n, v in votes.items() if v == side]
+    against = [n for n, v in votes.items() if v == -side]
+    st.markdown(f"**What the indicators say now:** {len(agree)} agree with this trade, {len(against)} against.")
+    st.caption(("Agree: " + ", ".join(agree) if agree else "None agree.") + "  ·  " +
+               ("Against: " + ", ".join(against) if against else "None against."))
+
+# --- Risk manager -------------------------------------------------------------------
+with tab_risk:
+    st.markdown("#### What simple limits would have changed")
+    st.caption("Replays the bot's trades in time order across the selected coins and skips any that would break "
+               "a limit. Idea from the day-trader-skill pack's risk manager.")
+    c1, c2, c3 = st.columns(3)
+    pool_r = c1.selectbox("Option", pools, key="risk_pool")
+    max_day = c2.number_input("Most trades per day (all coins)", 1, 50, 3, key="risk_max")
+    loss_day = c3.number_input("Stop for the day after losing (EUR)", 0.5, 100.0, 3.0, 0.5, key="risk_loss")
+    sel_r = trades[trades["pool"] == pool_r] if not trades.empty else trades
+    if sel_r.empty:
+        st.info("This option made no trades with the current settings.")
+    else:
+        limited = tools.apply_risk_limits(sel_r, int(max_day), float(loss_day))
+        summary_r = tools.risk_summary(limited)
+        st.dataframe(summary_r, hide_index=True, width="stretch", column_config={
+            "bot": st.column_config.TextColumn("Bot"),
+            "trades": st.column_config.NumberColumn("Trades"),
+            "profit_EUR": st.column_config.NumberColumn("Profit", format="€%.2f"),
+            "worst_day_EUR": st.column_config.NumberColumn("Worst day", format="€%.2f"),
+            "biggest_drop_EUR": st.column_config.NumberColumn("Biggest drop from a high", format="€%.2f")})
+        fig = go.Figure()
+        for label, frame, colour, dash in [("no limits", limited, THEME["muted"], "dot"),
+                                           ("with your limits", limited[limited["taken"]], THEME["accent"], "solid")]:
+            curve = frame.sort_values("exit_time")
+            fig.add_scatter(x=curve["exit_time"], y=curve["net_profit"].cumsum(), mode="lines", name=label,
+                            line=dict(color=colour, width=2, dash=dash),
+                            hovertemplate="%{x|%d %b}: €%{y:.2f} so far<extra>" + label + "</extra>")
+        st.plotly_chart(chart_layout(fig, height=360, y_title="EUR"), width="stretch")
+        skipped = limited["skipped_because"].value_counts().drop("", errors="ignore")
+        if not skipped.empty:
+            st.caption("Skipped: " + ", ".join(f"{n} by the {k}" for k, n in skipped.items()) +
+                       ". Limits cap the damage of a bad day; they cannot turn a losing strategy into a winning one.")
