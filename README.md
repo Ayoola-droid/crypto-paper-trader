@@ -95,13 +95,26 @@ Every hour, for every coin, the study imagines a long and a short trade with the
 
 - **Time Machine** (`src/trade_tools.py`, app tab): for a Bitcoin long at the 8 November 2026 price, 48% of 10,000 replays reached the €1 target first and 51% the stop, against the 58% needed; the same trade opened at every hour of the past 60 days hit the target 49% of the time (−€0.18 a trade).
 - **Risk manager** (`src/trade_tools.py`, app tab): with at most 3 trades a day and a stop for the day after losing €3, the single-indicator bot lost €134.19 over 533 trades instead of €245.42 over 869, and its worst day improved from −€12.21 to −€4.70. Limits cap the damage of a bad day; they cannot make a losing strategy win.
-- **Opening-range breakout on US stocks** (`src/stocks_orb.py`): see below.
+- **Opening-range breakout on US stocks** (`src/stocks_orb.py`): none of 24 settings made money on unseen sessions, even at near-zero costs; see below.
 
 ### Opening-range breakout on US stocks (`src/stocks_orb.py`)
 
 US brokers such as Alpaca charge no commission on shares, so the main cost is the spread, about 0.02% per buy or sell for large stocks, far below Kraken's 0.80% crypto fee. The test uses Yahoo's last 60 days of 5-minute bars for 30 large US stocks and ETFs: the first half of the sessions picks the best of 24 settings (15 or 30-minute range; stop at the range middle or its other side; target 1R, 2R or €1 on €100; long only or long and short), and the second half tests it. The study reproduces the pack's own worked example exactly (Tesla, 19 October 2026: range 354.47–362.18, entry 364.18, stop 358.32).
 
-*Results to follow.* On the pack's Tesla sample alone (59 sessions), none of the 24 settings made money in the test half, and settings that did best in the first half did worst in the second (correlation −0.80).
+Results for 30 stocks and ETFs, 59 sessions (21 August to 13 November 2026; search to 1 October, test from 2 October):
+
+| | Spread 0.02% (big stocks) | Spread 0.05% (cautious) |
+|---|---|---|
+| Settings that made money in the test half | 0 of 24 | 0 of 24 |
+| Setting chosen on the search half | 15-minute range, stop at the middle, 1R, long only | same |
+| Its test-half result | −€0.077 a trade over 464 trades (−€35.75) | −€0.137 a trade over 462 trades (−€63.38) |
+| Agreement between search and test rankings | +0.09 | +0.09 |
+| Holding SPY through the test half | −€2.12 per €100 | |
+
+- **Cheaper costs shrank the losses but did not remove them.** Per trade, stocks lost €0.03–€0.11 at a 0.02% spread, against €0.25–€0.30 for the crypto bot, but no setting made money.
+- **Before costs, long-only breakouts were slightly positive** (an average of +0.01 to +0.09 of the risk per trade), but the spread took more than that.
+- **€1 on €100 needs a 1% move within the day,** which large stocks rarely make: the €1 target was hit in only 25–31% of test trades.
+- **The search half did not predict the test half** (correlation +0.09), so picking "the best setting" from past results added nothing.
 
 ## Skills demonstrated
 
