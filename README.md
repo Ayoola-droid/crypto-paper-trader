@@ -89,6 +89,20 @@ Every hour, for every coin, the study imagines a long and a short trade with the
 - Good and bad months did not repeat: for Bitcoin the pattern even reversed. Weekday patterns did not hold either.
 - Bitcoin's return in the second year after a halving was +166%, −49% and −13% in the three cycles: no consistent cycle, and three cycles are too few to tell.
 
+## Ideas borrowed from the day-trader-skill pack
+
+[day-trader-skill](https://github.com/Jakeschincariol/day-trader-skill) (MIT licence, by Jake Schincariol) is a set of Claude skills for day trading US stocks. Three ideas from it were rewritten for this project (no code copied):
+
+- **Time Machine** (`src/trade_tools.py`, app tab): for a Bitcoin long at the 8 November 2026 price, 48% of 10,000 replays reached the €1 target first and 51% the stop, against the 58% needed; the same trade opened at every hour of the past 60 days hit the target 49% of the time (−€0.18 a trade).
+- **Risk manager** (`src/trade_tools.py`, app tab): with at most 3 trades a day and a stop for the day after losing €3, the single-indicator bot lost €134.19 over 533 trades instead of €245.42 over 869, and its worst day improved from −€12.21 to −€4.70. Limits cap the damage of a bad day; they cannot make a losing strategy win.
+- **Opening-range breakout on US stocks** (`src/stocks_orb.py`): see below.
+
+### Opening-range breakout on US stocks (`src/stocks_orb.py`)
+
+US brokers such as Alpaca charge no commission on shares, so the main cost is the spread, about 0.02% per buy or sell for large stocks, far below Kraken's 0.80% crypto fee. The test uses Yahoo's last 60 days of 5-minute bars for 30 large US stocks and ETFs: the first half of the sessions picks the best of 24 settings (15 or 30-minute range; stop at the range middle or its other side; target 1R, 2R or €1 on €100; long only or long and short), and the second half tests it. The study reproduces the pack's own worked example exactly (Tesla, 19 October 2026: range 354.47–362.18, entry 364.18, stop 358.32).
+
+*Results to follow.* On the pack's Tesla sample alone (59 sessions), none of the 24 settings made money in the test half, and settings that did best in the first half did worst in the second (correlation −0.80).
+
 ## Skills demonstrated
 
 - **Python and pandas:** web APIs, large archive downloads, combining files, time-series indicators (EMA, MACD, RSI, ATR, ADX, Supertrend, Ichimoku, Bollinger, Donchian, OBV, VWAP)
@@ -116,6 +130,8 @@ Every hour, for every coin, the study imagines a long and a short trade with the
 | Trades on the chart | Every trade marked on the price chart: ▲ long, ▼ short, blue for a hit, red for a miss |
 | Indicator accuracy | How often each indicator called the next 24 hours correctly, coin by coin |
 | Trend ranking | Each coin's trend strength every week and which coins were traded |
+| Time Machine | Replays a trade opened at the latest price 10,000 times over the next 48 hours, from the coin's own last 60 days at a similar time of day: odds of the target or the stop first, a verdict against break-even, and what the indicators say now |
+| Risk manager | Applies a most-trades-per-day limit and a daily loss limit to the bot's trades and shows what changed |
 
 **Design direction: "Night ledger"**, a research notebook for a sceptical trader. Blue-black page, warm paper-coloured text, one amber accent, Fraunces serif headlines, Source Sans 3 body text and JetBrains Mono for data labels. Fonts are bundled in `static/fonts` (SIL Open Font Licence) so the app works offline. Colours live in `.streamlit/config.toml` and the `THEME` dictionary in `app.py`; the three chart colours were checked for colour-blind separation.
 
@@ -175,6 +191,8 @@ py src\funding_carry.py     # funding-rate carry study (downloads Kraken Futures
 py src\pattern_study.py     # what winning trades have in common, tested on unseen months
 py src\download_macro.py    # FRED: Bitcoin/Ether since 2015, Nasdaq, dollar, interest rate, money supply
 py src\macro_study.py       # economic releases, macro regimes and seasonality
+py src\stocks_orb.py download   # Yahoo 5-minute bars for 30 US stocks (kept locally, not committed)
+py src\stocks_orb.py test       # opening-range breakout: settings chosen on one half, tested on the other
 streamlit run app.py         # the front end
 ```
 
@@ -207,6 +225,8 @@ If PowerShell blocks the activate script, run `Set-ExecutionPolicy -Scope Curren
 | `src/pattern_study.py` | Finds patterns in winning trades in Jan–Jun and tests them on Jul–Nov |
 | `src/download_macro.py` | Downloads macro series and long Bitcoin/Ether history from FRED |
 | `src/macro_study.py` | Tests US economic releases, macro regimes and seasonality |
+| `src/trade_tools.py` | Time Machine and risk manager used by the app |
+| `src/stocks_orb.py` | Opening-range breakout on US stocks with near-zero costs |
 | `src/paper_trader.py` | Scalping backtest on Bitcoin, at four fee levels |
 | `src/trend_trader.py` | Long/short 15-minute trend backtest on five coins, against buy-and-hold |
 
@@ -219,6 +239,7 @@ crypto-paper-trader/
 │   ├── history/       hourly prices from Kraken's quarterly archives
 │   ├── funding/       Kraken Futures funding rates
 │   ├── macro/         FRED series and the official US release calendar (events.csv)
+│   ├── stocks/        Yahoo 5-minute bars (downloaded locally, not committed)
 │   ├── raw/           one CSV per coin, candle size and API download; never edited
 │   └── archive/       temporary ZIP downloads (not committed)
 ├── output/            results and trade logs (not committed)
